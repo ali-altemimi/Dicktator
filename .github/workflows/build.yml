@@ -32,12 +32,12 @@ jobs:
           # nests deep, and MSBuild fails past 260 characters (FTK1011).
           - os: windows-latest
             target_dir: C:\t
-          - os: ubuntu-24.04
-            target_dir: ${{ github.workspace }}/src-tauri/target
+          - os: ubuntu-24.04 # default target dir (set below)
     runs-on: ${{ matrix.os }}
     env:
       VULKAN_VERSION: 1.4.363.1
-      CARGO_TARGET_DIR: ${{ matrix.target_dir }}
+      # (github.workspace is empty inside the matrix, so default it here.)
+      CARGO_TARGET_DIR: ${{ matrix.target_dir || format('{0}/src-tauri/target', github.workspace) }}
     steps:
       - uses: actions/checkout@v4
 
