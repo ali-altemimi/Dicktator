@@ -132,7 +132,10 @@ impl Config {
 
     pub fn default_model() -> PathBuf {
         let home = dirs::home_dir().unwrap_or_default();
-        dirs::data_dir()
+        // The *local* data dir: on Windows that's %LOCALAPPDATA%, not the
+        // roaming %APPDATA%, which can be synced between machines (bad for a
+        // 574 MB file). On Linux and macOS the two are the same.
+        dirs::data_local_dir()
             .unwrap_or_else(|| home.join(".local/share"))
             .join("dictator/models")
             .join(DEFAULT_MODEL)
@@ -185,6 +188,17 @@ mod tests {
         let s = Settings { hotkey_mode: HotkeyMode::Hold, auto_off_minutes: 5, ..Default::default() };
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path), s);
+    }
+
+    #[test]
+    fn default_hotkeys_parse() {
+        use std::str::FromStr;
+        use tauri_plugin_global_shortcut::Shortcut;
+        let k = Hotkeys::default();
+        // Plus what the settings UI produces for Super, digits and symbols.
+        for key in [&*k.record, &*k.power, &*k.copy, &*k.undo, &*k.overlay, "Super+Z", "Ctrl+1", "Alt+Backquote", "F8"] {
+            assert!(Shortcut::from_str(key).is_ok(), "{key} doesn't parse");
+        }
     }
 
     #[test]

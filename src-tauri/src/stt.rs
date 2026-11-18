@@ -23,6 +23,7 @@ impl Transcriber {
         // Route whisper.cpp's very chatty logging into the (unused) `log` facade.
         QUIET.call_once(whisper_rs::install_logging_hooks);
 
+        check_gpu_runtime()?;
         let path = model.to_str().context("Model path isn't valid UTF-8")?;
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .with_context(|| format!("Couldn't load model {}", model.display()))?;
@@ -78,6 +79,30 @@ impl Transcriber {
             .join(" ");
         Ok(text)
     }
+}
+
+/// Windows: vulkan-1.dll is delay-loaded (see build.rs), so check it exists
+/// before whisper.cpp first calls into it. If it's missing, the delay-load
+/// would crash the app instead of failing cleanly.
+#[cfg(windows)]
+fn check_gpu_runtime() -> Result<()> {
+    use windows::Win32::Foundation::FreeLibrary;
+    use windows::Win32::System::LibraryLoader::LoadLibraryW;
+    match unsafe { LoadLibraryW(windows::core::w!("vulkan-1.dll")) } {
+        Ok(module) => {
+            let _ = unsafe { FreeLibrary(module) };
+            Ok(())
+        }
+        Err(_) => anyhow::bail!(
+            "Your graphics driver doesn't support Vulkan, which Dictator needs. \
+             Update your GPU driver (NVIDIA, AMD or Intel) and try again"
+        ),
+    }
+}
+
+#[cfg(not(windows))]
+fn check_gpu_runtime() -> Result<()> {
+    Ok(())
 }
 
 fn rms(audio: &[f32]) -> f32 {
