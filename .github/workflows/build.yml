@@ -85,11 +85,17 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          esc() { sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}'; }
           for f in test.log build.log; do
             [ -f "$f" ] || continue
-            body=$(grep -vE '^\s+(Compiling|Downloaded|Checking) ' "$f" | tail -n 40 \
-              | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
-            echo "::error title=${f} (last 40 lines)::${body}"
+            # The real error is often buried under build noise (CMake is very
+            # chatty), so pull out compiler/linker error lines as well as the tail.
+            errors=$(grep -E 'error( |:|\[)|fatal|LNK[0-9]|MSB[0-9]|panicked' "$f" \
+              | grep -vE 'warning|-Werror|error_for_status' | head -n 30 | esc)
+            [ -n "$errors" ] && echo "::error title=${f} (error lines)::${errors}"
+            tail=$(grep -vE '^\s+(Compiling|Downloaded|Checking) |Called from|CMake Warning|policy' "$f" \
+              | tail -n 25 | esc)
+            echo "::error title=${f} (last lines)::${tail}"
           done
 
       - uses: actions/upload-artifact@v4
