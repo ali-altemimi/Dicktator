@@ -15,6 +15,8 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      VULKAN_VERSION: 1.4.363.1
     steps:
       - uses: actions/checkout@v4
 
@@ -26,13 +28,30 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev \
             libvulkan-dev glslc
 
-      # whisper.cpp's Vulkan backend needs the Vulkan headers, loader and glslc.
-      - name: Vulkan SDK
+      # whisper.cpp's Vulkan backend needs the Vulkan SDK (headers,
+      # vulkan-1.lib, glslc). The official LunarG installer, as whisper.cpp's
+      # own CI uses; cached, since it's ~300 MB.
+      - name: Cache Vulkan SDK
         if: runner.os == 'Windows'
-        uses: humbletim/install-vulkan-sdk@v1.2
+        id: vulkan-cache
+        uses: actions/cache@v4
         with:
-          version: latest
-          cache: true
+          path: C:\VulkanSDK
+          key: vulkan-sdk-${{ env.VULKAN_VERSION }}
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows' && steps.vulkan-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\vulkan.exe" $url
+          & "$env:RUNNER_TEMP\vulkan.exe" --root C:\VulkanSDK --accept-licenses --default-answer --confirm-command install
+      - name: Use Vulkan SDK
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path C:\VulkanSDK\Lib\vulkan-1.lib)) { throw "Vulkan SDK install is incomplete" }
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\Bin"
 
       - uses: pnpm/action-setup@v4
         with:
