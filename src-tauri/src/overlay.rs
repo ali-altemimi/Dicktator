@@ -12,6 +12,7 @@ const WIDTH: f64 = 780.0;
 const HEIGHT: f64 = 180.0;
 const TOP_MARGIN: i32 = 10;
 
+/// Creates the overlay, hidden. Call [`set_visible`] to show it.
 pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("overlay".into()))
         .title("Dictator overlay")
@@ -25,35 +26,57 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .focused(false)
         .visible(false)
         .build()?;
-
-    if !platform::setup(&window)? {
-        window.show()?;
-        // Click-through. Must come after show(): on GTK this sets an empty
-        // input region on the realized window.
-        window.set_ignore_cursor_events(true)?;
-    }
+    platform::setup(&window)?;
     Ok(window)
 }
 
-pub fn toggle(app: &AppHandle) -> tauri::Result<()> {
-    match app.get_webview_window(LABEL) {
-        Some(w) if w.is_visible()? => w.hide(),
-        Some(w) => {
-            w.show()?;
-            w.set_ignore_cursor_events(true)
+/// Shows or hides the overlay. Safe to call from any thread.
+pub fn set_visible(app: &AppHandle, visible: bool) {
+    let Some(window) = app.get_webview_window(LABEL) else { return };
+    let _ = app.run_on_main_thread(move || {
+        if platform::set_visible(visible) {
+            return;
         }
-        None => create(app).map(|_| ()),
-    }
+        if visible {
+            let _ = window.show();
+            // Click-through. Must come after show(): on GTK this sets an
+            // empty input region on the realized window.
+            let _ = window.set_ignore_cursor_events(true);
+        } else {
+            let _ = window.hide();
+        }
+    });
 }
 
 #[cfg(target_os = "linux")]
 mod platform {
     use gtk::prelude::*;
     use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+    use std::cell::RefCell;
     use tauri::WebviewWindow;
 
-    /// Returns true if the overlay now lives in its own layer-shell surface.
-    pub fn setup(window: &WebviewWindow) -> tauri::Result<bool> {
+    thread_local! {
+        // The layer-shell window, if we made one. GTK objects live on the main thread.
+        static LAYER: RefCell<Option<gtk::Window>> = const { RefCell::new(None) };
+    }
+
+    /// Shows/hides the layer-shell window. Returns false if there isn't one
+    /// (the caller then uses the normal Tauri window). Main thread only.
+    pub fn set_visible(visible: bool) -> bool {
+        LAYER.with_borrow(|layer| match layer {
+            Some(w) if visible => {
+                w.show();
+                true
+            }
+            Some(w) => {
+                w.hide();
+                true
+            }
+            None => false,
+        })
+    }
+
+    pub fn setup(window: &WebviewWindow) -> tauri::Result<()> {
         let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
         if !wayland
             || !gtk_layer_shell::is_supported()
@@ -61,7 +84,7 @@ mod platform {
         {
             // X11, or a Wayland compositor without layer-shell (GNOME): fall back
             // to the plain always-on-top window from the builder.
-            return Ok(false);
+            return Ok(());
         }
         // Layer-shell must be set up before a window is first mapped, but tao
         // realizes its windows on creation. So move the webview into a fresh
@@ -84,14 +107,16 @@ mod platform {
         layer.set_layer_shell_margin(Edge::Top, super::TOP_MARGIN);
         layer.set_size_request(super::WIDTH as i32, super::HEIGHT as i32);
         layer.add(&vbox);
-        layer.connect_realize(|w| {
+        vbox.show_all();
+        layer.connect_map(|w| {
             // Empty input region: every click goes to whatever is underneath.
+            // Re-applied on every show, since hiding unmaps the layer surface.
             if let Some(gdk_window) = w.window() {
                 gdk_window.input_shape_combine_region(&gtk::cairo::Region::create(), 0, 0);
             }
         });
-        layer.show_all();
-        Ok(true)
+        LAYER.set(Some(layer));
+        Ok(())
     }
 }
 
@@ -99,9 +124,13 @@ mod platform {
 mod platform {
     use tauri::WebviewWindow;
 
-    pub fn setup(_window: &WebviewWindow) -> tauri::Result<bool> {
+    pub fn setup(_window: &WebviewWindow) -> tauri::Result<()> {
         // TODO(windows): WS_EX_NOACTIVATE so it can't steal focus from the game.
         // TODO(macos): NSPanel level above fullscreen spaces.
-        Ok(false)
+        Ok(())
+    }
+
+    pub fn set_visible(_visible: bool) -> bool {
+        false
     }
 }

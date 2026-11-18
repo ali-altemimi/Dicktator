@@ -1,37 +1,54 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
 
-  type State = { status: "idle" | "recording" | "transcribing"; text: string };
+  // Mirrors engine::Snapshot in src-tauri/src/engine.rs.
+  type Status = "off" | "loading" | "ready" | "recording" | "transcribing";
+  type Snapshot = { status: Status; text: string; words: number; msg: string };
 
-  let status = $state<State["status"]>("idle");
+  let status = $state<Status>("off");
   let text = $state("");
-  let words = $derived(text.split(/\s+/).filter(Boolean).length);
+  let words = $state(0);
+  let msg = $state("");
+  let msgTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const label = {
-    idle: "Ready",
+  const label: Record<Status, string> = {
+    off: "Off",
+    loading: "Starting up…",
+    ready: "Ready",
     recording: "Listening…",
     transcribing: "Transcribing…",
   };
 
+  function apply(s: Snapshot) {
+    status = s.status;
+    text = s.text;
+    words = s.words;
+    if (s.msg) {
+      msg = s.msg;
+      clearTimeout(msgTimer);
+      msgTimer = setTimeout(() => (msg = ""), 4000);
+    }
+  }
+
   onMount(() => {
-    const unlisten = listen<State>("state", (e) => {
-      status = e.payload.status;
-      text = e.payload.text;
-    });
+    const unlisten = listen<Snapshot>("state", (e) => apply(e.payload));
+    invoke<Snapshot | null>("get_state").then((s) => s && apply(s));
     return () => void unlisten.then((f) => f());
   });
 </script>
 
-<div class="box" class:recording={status === "recording"} class:idle={status === "idle"}>
+<div class="box {status}" class:dim={status === "ready" && !msg}>
   <header>
     <span class="dot {status}"></span>
     <strong>{label[status]}</strong>
     <span class="muted">· {words} words</span>
+    {#if msg}<span class="msg">· {msg}</span>{/if}
   </header>
   <!-- Bottom-aligned and clipped at the top, so the newest line is always visible. -->
   <div class="body">
-    <p class:empty={!text.trim()}>{text.trim() ? text.slice(-1500) : "(empty, dictated text shows up here)"}</p>
+    <p class:empty={!text.trim()}>{text.trim() ? text : "(empty, dictated text shows up here)"}</p>
   </div>
 </div>
 
@@ -45,7 +62,6 @@
   }
   .box {
     box-sizing: border-box;
-    margin: 0;
     padding: 10px 14px 12px;
     border-radius: 10px;
     background: rgba(15, 15, 20, 0.72);
@@ -53,13 +69,14 @@
     color: #f2f2f5;
     transition: opacity 200ms, border-color 200ms;
   }
-  .box.idle { opacity: 0.6; }
+  .box.dim { opacity: 0.6; }
   .box.recording { border-color: #e5484d; }
-  header { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  header { display: flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
   .muted { color: #9a9aa6; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #6b6b76; }
+  .msg { color: #7fd1ff; overflow: hidden; text-overflow: ellipsis; }
+  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #6b6b76; }
   .dot.recording { background: #e5484d; animation: pulse 1s infinite; }
-  .dot.transcribing { background: #f5c542; animation: pulse 1s infinite; }
+  .dot.transcribing, .dot.loading { background: #f5c542; animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: 0.3; } }
   .body {
     margin-top: 6px;
