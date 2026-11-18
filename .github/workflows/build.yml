@@ -49,9 +49,29 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - name: Unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml 2>&1 | tee test.log
       - name: Build installers
-        run: pnpm tauri build
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm tauri build 2>&1 | tee build.log
+
+      # Job logs need a GitHub login to read, but annotations don't. So post
+      # the end of a failing step's output as an annotation, which anyone (or
+      # any script) can read from the run page or the API.
+      - name: Report failure
+        if: failure()
+        shell: bash
+        run: |
+          for f in test.log build.log; do
+            [ -f "$f" ] || continue
+            body=$(grep -vE '^\s+(Compiling|Downloaded|Checking) ' "$f" | tail -n 40 \
+              | sed -e 's/%/%25/g' -e 's/\r//g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=${f} (last 40 lines)::${body}"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
