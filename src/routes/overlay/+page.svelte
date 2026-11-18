@@ -12,6 +12,7 @@
   let words = $state(0);
   let msg = $state("");
   let msgTimer: ReturnType<typeof setTimeout> | undefined;
+  let position = $state<"top" | "bottom">("top");
 
   const label: Record<Status, string> = {
     off: "Off",
@@ -33,12 +34,19 @@
   }
 
   onMount(() => {
-    const unlisten = listen<Snapshot>("state", (e) => apply(e.payload));
+    type Settings = { overlayPosition: "top" | "bottom" };
+    const unlisten = [
+      listen<Snapshot>("state", (e) => apply(e.payload)),
+      listen<Settings>("settings", (e) => (position = e.payload.overlayPosition)),
+    ];
     invoke<Snapshot | null>("get_state").then((s) => s && apply(s));
-    return () => void unlisten.then((f) => f());
+    invoke<Settings>("get_settings").then((s) => (position = s.overlayPosition));
+    return () => unlisten.forEach((u) => u.then((f) => f()));
   });
 </script>
 
+<!-- The window is a fixed size; hug its top or bottom edge to match the position. -->
+<div class="frame {position}">
 <div class="box {status}" class:dim={status === "ready" && !msg}>
   <header>
     <span class="dot {status}"></span>
@@ -51,6 +59,7 @@
     <p class:empty={!text.trim()}>{text.trim() ? text : "(empty, dictated text shows up here)"}</p>
   </div>
 </div>
+</div>
 
 <style>
   :global(html),
@@ -60,6 +69,8 @@
     overflow: hidden;
     font-family: Inter, system-ui, sans-serif;
   }
+  .frame { height: 100vh; display: flex; flex-direction: column; }
+  .frame.bottom { justify-content: flex-end; }
   .box {
     box-sizing: border-box;
     padding: 10px 14px 12px;

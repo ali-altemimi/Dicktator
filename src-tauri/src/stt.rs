@@ -106,7 +106,7 @@ mod tests {
             .collect();
 
         let t = std::time::Instant::now();
-        let model = Transcriber::load(&crate::config::Config::load().model).unwrap();
+        let model = Transcriber::load(&crate::config::Config::from_settings(&Default::default()).model).unwrap();
         println!("load: {:.2?}", t.elapsed());
         for _ in 0..2 {
             let t = std::time::Instant::now();

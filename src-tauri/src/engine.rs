@@ -8,13 +8,15 @@
 use crate::audio::{Recorder, SAMPLE_RATE};
 use crate::config::Config;
 use crate::draft::Draft;
+use crate::sound::Chime;
 use crate::stt::Transcriber;
 use crate::text::{self, Outcome};
 use anyhow::Result;
 use serde::Serialize;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -79,6 +81,7 @@ impl Command {
 pub trait Host: Send + 'static {
     fn update(&self, snapshot: &Snapshot);
     fn copy_to_clipboard(&self, text: &str) -> Result<()>;
+    fn chime(&self, chime: Chime);
 }
 
 #[derive(Clone)]
@@ -102,6 +105,7 @@ impl Engine {
                 want_on: false,
                 loading: false,
                 pending: 0,
+                last_used: Instant::now(),
                 msg: String::new(),
                 tx: actor_tx,
                 jobs,
@@ -114,10 +118,17 @@ impl Engine {
     pub fn send(&self, command: Command) {
         let _ = self.tx.send(Msg::Command(command));
     }
+
+    /// Applies changed settings. Language and auto-off apply right away; a new
+    /// draft folder or model applies from the next "on".
+    pub fn configure(&self, config: Config) {
+        let _ = self.tx.send(Msg::Configure(config));
+    }
 }
 
 enum Msg {
     Command(Command),
+    Configure(Config),
     Loaded(Result<Transcriber>),
     Transcribed(Result<String>),
 }
@@ -163,6 +174,8 @@ struct Actor<H: Host> {
     loading: bool,
     /// Clips sent to the worker and not back yet.
     pending: usize,
+    /// For auto-off: when the user last did anything.
+    last_used: Instant,
     msg: String,
     tx: Sender<Msg>,
     jobs: Sender<Job>,
@@ -171,14 +184,59 @@ struct Actor<H: Host> {
 impl<H: Host> Actor<H> {
     fn run(mut self, rx: Receiver<Msg>) {
         self.publish();
-        for msg in rx {
+        loop {
+            let msg = match self.auto_off_in() {
+                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                Some(wait) => rx.recv_timeout(wait),
+            };
             match msg {
-                Msg::Command(c) => self.command(c),
-                Msg::Loaded(result) => self.loaded(result),
-                Msg::Transcribed(result) => self.transcribed(result),
+                Ok(Msg::Command(c)) => {
+                    self.last_used = Instant::now();
+                    self.command(c);
+                }
+                Ok(Msg::Configure(c)) => self.configure(c),
+                Ok(Msg::Loaded(result)) => self.loaded(result),
+                Ok(Msg::Transcribed(result)) => {
+                    self.last_used = Instant::now();
+                    self.transcribed(result);
+                }
+                Err(RecvTimeoutError::Timeout) => self.idle_timeout(),
+                Err(RecvTimeoutError::Disconnected) => break,
             }
             self.publish();
         }
+    }
+
+    /// How long until auto-off should kick in, if it applies right now.
+    fn auto_off_in(&self) -> Option<Duration> {
+        let limit = self.config.auto_off?;
+        let idle = self.model.is_some() && !self.recorder.is_recording() && self.pending == 0;
+        idle.then(|| limit.saturating_sub(self.last_used.elapsed()))
+    }
+
+    fn idle_timeout(&mut self) {
+        if self.auto_off_in() == Some(Duration::ZERO) {
+            self.turn_off();
+            let mins = self.config.auto_off.map_or(0, |d| d.as_secs() / 60);
+            self.msg = format!("Turned off after {mins} min unused");
+        }
+    }
+
+    fn configure(&mut self, config: Config) {
+        if config.draft_dir != self.config.draft_dir {
+            match Draft::open(config.draft_dir.clone()) {
+                Ok(draft) => self.draft = draft,
+                Err(e) => {
+                    self.msg = format!("Can't use that folder: {e}");
+                    return;
+                }
+            }
+        }
+        if config.model != self.config.model && (self.model.is_some() || self.loading) {
+            self.turn_off();
+            self.msg = "Model changed. Turn on again to load it".into();
+        }
+        self.config = Arc::new(config);
     }
 
     fn command(&mut self, command: Command) {
@@ -239,13 +297,18 @@ impl<H: Host> Actor<H> {
             self.msg = if self.loading { "Still loading…" } else { "Dictator is off" }.into();
             return;
         }
-        if let Err(e) = self.recorder.start() {
-            self.msg = format!("{e:#}");
+        if self.recorder.is_recording() {
+            return;
+        }
+        match self.recorder.start() {
+            Ok(()) => self.host.chime(Chime::Start),
+            Err(e) => self.msg = format!("{e:#}"),
         }
     }
 
     fn stop(&mut self) {
         let Some(audio) = self.recorder.stop() else { return };
+        self.host.chime(Chime::Stop);
         let Some(model) = self.model.clone() else { return };
         if (audio.len() as f32) < MIN_CLIP_SECS * SAMPLE_RATE as f32 {
             self.msg = "Too short, ignored".into();

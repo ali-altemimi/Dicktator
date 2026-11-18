@@ -8,21 +8,31 @@ into your doc when you're done.
 - Click-through overlay that sits above fullscreen (borderless) games
 - Windows and Linux (including Wayland/Hyprland); macOS later
 
-**Status:** early development. Works end to end on Linux/Wayland, driven from the
-command line. There's no built-in hotkey, tray icon or settings window yet.
+**Status:** early development. Works end to end on Linux/Wayland. The Windows build
+hasn't been tested yet.
 
 ## Usage
 
-Dictator starts **off**: the model isn't loaded and the mic can't be opened. Control
-it by running `dictator <command>`. If it's already running, the command goes to
-the running instance:
+Dictator lives in the tray and starts **off**: the model isn't loaded and the mic
+can't be opened. Turn it on, and the overlay appears with the model ready about 2 s later.
 
-| Command | Does |
+| Default hotkey | Does |
 |---|---|
-| `on` / `off` / `power` | Load the model and show the overlay / unload and hide / switch between the two |
-| `toggle` | Start or stop recording (`start`, `stop`, `cancel` also exist) |
-| `undo` | Remove the last dictated chunk (or say "scratch that") |
-| `copy` | Copy the draft to the clipboard and clear it (it's also saved to `archive.txt`) |
+| Ctrl+Alt+D | Start / stop recording (or hold to talk; you can switch in settings) |
+| Ctrl+Alt+Shift+D | Turn on / off |
+| Ctrl+Alt+C | Copy the draft to the clipboard and clear it (also saved to `archive.txt`) |
+| Ctrl+Alt+Z | Undo the last chunk (or say "scratch that") |
+| Ctrl+Alt+O | Show / hide the overlay |
+
+You can change all of these in the settings window (tray → Settings…). It also
+has auto-off after idle time (default 30 min), start on login, chimes, the
+overlay's position and the language.
+
+**Wayland** doesn't let apps grab global keys, so on Wayland you bind the CLI
+in your compositor. The settings window generates the Hyprland lines for you.
+`dictator <command>` sends the command to the running instance:
+`on`, `off`, `power`, `toggle`, `start`, `stop`, `cancel`, `undo`, `copy`,
+`overlay`, `settings`, `quit`.
 
 Say "new paragraph" or "new line" while dictating to break up the text.
 

@@ -5,12 +5,13 @@
 //! - Wayland: wlr-layer-shell "overlay" layer (Hyprland, Sway, KDE; not GNOME).
 //! - Windows / X11 / macOS: a regular always-on-top window.
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use crate::config::OverlayPosition;
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub const LABEL: &str = "overlay";
 const WIDTH: f64 = 780.0;
 const HEIGHT: f64 = 180.0;
-const TOP_MARGIN: i32 = 10;
+const MARGIN: i32 = 10;
 
 /// Creates the overlay, hidden. Call [`set_visible`] to show it.
 pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
@@ -28,6 +29,29 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .build()?;
     platform::setup(&window)?;
     Ok(window)
+}
+
+/// Moves the overlay to the top or bottom centre of the screen. Any thread.
+pub fn set_position(app: &AppHandle, position: OverlayPosition) {
+    let Some(window) = app.get_webview_window(LABEL) else { return };
+    let _ = app.run_on_main_thread(move || {
+        if platform::set_position(position) {
+            return;
+        }
+        let monitor = window.current_monitor().ok().flatten();
+        let Some(monitor) = monitor.or_else(|| window.primary_monitor().ok().flatten()) else {
+            return;
+        };
+        let (origin, size, scale) = (monitor.position(), monitor.size(), monitor.scale_factor());
+        let (w, h) = ((WIDTH * scale) as i32, (HEIGHT * scale) as i32);
+        let margin = (f64::from(MARGIN) * scale) as i32;
+        let x = origin.x + (size.width as i32 - w) / 2;
+        let y = match position {
+            OverlayPosition::Top => origin.y + margin,
+            OverlayPosition::Bottom => origin.y + size.height as i32 - h - margin,
+        };
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+    });
 }
 
 /// Shows or hides the overlay. Safe to call from any thread.
@@ -50,6 +74,7 @@ pub fn set_visible(app: &AppHandle, visible: bool) {
 
 #[cfg(target_os = "linux")]
 mod platform {
+    use crate::config::OverlayPosition;
     use gtk::prelude::*;
     use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
     use std::cell::RefCell;
@@ -73,6 +98,18 @@ mod platform {
                 true
             }
             None => false,
+        })
+    }
+
+    /// Re-anchors the layer-shell window. Returns false if there isn't one.
+    pub fn set_position(position: OverlayPosition) -> bool {
+        LAYER.with_borrow(|layer| {
+            let Some(w) = layer else { return false };
+            let top = position == OverlayPosition::Top;
+            w.set_anchor(Edge::Top, top);
+            w.set_anchor(Edge::Bottom, !top);
+            w.set_layer_shell_margin(if top { Edge::Top } else { Edge::Bottom }, super::MARGIN);
+            true
         })
     }
 
@@ -104,7 +141,8 @@ mod platform {
         layer.set_keyboard_mode(KeyboardMode::None);
         layer.set_exclusive_zone(-1); // don't push other windows around
         layer.set_anchor(Edge::Top, true);
-        layer.set_layer_shell_margin(Edge::Top, super::TOP_MARGIN);
+        layer.set_layer_shell_margin(Edge::Top, super::MARGIN);
+        layer.set_layer_shell_margin(Edge::Bottom, super::MARGIN);
         layer.set_size_request(super::WIDTH as i32, super::HEIGHT as i32);
         layer.add(&vbox);
         vbox.show_all();
@@ -131,6 +169,10 @@ mod platform {
     }
 
     pub fn set_visible(_visible: bool) -> bool {
+        false
+    }
+
+    pub fn set_position(_position: crate::config::OverlayPosition) -> bool {
         false
     }
 }
