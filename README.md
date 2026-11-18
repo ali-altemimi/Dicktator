@@ -1,5 +1,7 @@
 # Dictator
 
+[![Build](https://github.com/ali-altemimi/Dicktator/actions/workflows/build.yml/badge.svg)](https://github.com/ali-altemimi/Dicktator/actions/workflows/build.yml)
+
 Dictate while you game. Press a hotkey, talk, and your words land in an on-screen
 draft drawn over the game, without ever taking focus away from it. Copy the draft
 into your doc when you're done.
