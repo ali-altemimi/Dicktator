@@ -3,7 +3,9 @@
 //!
 //! Each platform needs its own trick to stay on top:
 //! - Wayland: wlr-layer-shell "overlay" layer (Hyprland, Sway, KDE; not GNOME).
-//! - Windows / X11 / macOS: a regular always-on-top window.
+//! - Windows: a topmost window that can't be activated (WS_EX_NOACTIVATE) and
+//!   is shown with SW_SHOWNOACTIVATE, so it never takes focus from the game.
+//! - X11 / macOS: a regular always-on-top window.
 
 use crate::config::OverlayPosition;
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -25,6 +27,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
+        .focusable(false) // Windows: WS_EX_NOACTIVATE, never takes focus
         .visible(false)
         .build()?;
     platform::setup(&window)?;
@@ -158,12 +161,56 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+mod platform {
+    use std::cell::Cell;
+    use tauri::WebviewWindow;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_TOPMOST, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos, ShowWindow,
+    };
+
+    thread_local! {
+        // The overlay's HWND (as an integer; HWND isn't Send). Main thread only.
+        static OVERLAY: Cell<Option<isize>> = const { Cell::new(None) };
+    }
+
+    pub fn setup(window: &WebviewWindow) -> tauri::Result<()> {
+        // Click-through: tao adds WS_EX_TRANSPARENT | WS_EX_LAYERED. Done once,
+        // here; after this we show and hide the window ourselves and leave
+        // tao's style flags alone.
+        window.set_ignore_cursor_events(true)?;
+        OVERLAY.set(Some(window.hwnd()?.0 as isize));
+        Ok(())
+    }
+
+    /// Tao's show() can activate the window, which would pull focus out of the
+    /// game. SW_SHOWNOACTIVATE never does.
+    pub fn set_visible(visible: bool) -> bool {
+        let Some(raw) = OVERLAY.get() else { return false };
+        let hwnd = HWND(raw as *mut _);
+        unsafe {
+            let _ = ShowWindow(hwnd, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
+            if visible {
+                // Re-assert topmost: a game going fullscreen can push us down.
+                let flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE;
+                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+            }
+        }
+        true
+    }
+
+    pub fn set_position(_position: crate::config::OverlayPosition) -> bool {
+        false // the generic code positions the window; SetWindowPos keeps no-activate
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 mod platform {
     use tauri::WebviewWindow;
 
     pub fn setup(_window: &WebviewWindow) -> tauri::Result<()> {
-        // TODO(windows): WS_EX_NOACTIVATE so it can't steal focus from the game.
         // TODO(macos): NSPanel level above fullscreen spaces.
         Ok(())
     }

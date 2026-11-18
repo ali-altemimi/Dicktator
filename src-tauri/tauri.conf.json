@@ -30,10 +30,32 @@
     "targets": "all",
     "icon": [
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Productivity",
+    "shortDescription": "Dictate while you game",
+    "longDescription": "Press a hotkey, talk, and your words land in an on-screen draft drawn over the game without taking focus. Speech-to-text runs locally on your GPU.",
+    "license": "MIT",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libgtk-layer-shell0"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "gtk-layer-shell"
+        ]
+      }
+    }
   }
 }

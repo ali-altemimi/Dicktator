@@ -1,7 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import Shortcut from "./Shortcut.svelte";
 
@@ -38,6 +37,10 @@
   let words = $state(0);
   let msg = $state("");
   let saveError = $state("");
+  type ModelEntry = { id: string; label: string; note: string; bytes: number; downloaded: boolean; inUse: boolean };
+  let models = $state<ModelEntry[]>([]);
+  let download = $state<{ id: string; done: number; total: number } | null>(null);
+  let downloadError = $state("");
   let copied = $state(false);
 
   const statusLabel: Record<Status, string> = {
@@ -76,8 +79,12 @@
     invoke<Env>("environment").then((e) => (env = e));
     invoke<HotkeyStatus>("get_hotkey_status").then((h) => (hotkeyStatus = h));
     invoke<Snapshot | null>("get_state").then((s) => s && applyState(s));
-    const unlisten = listen<Snapshot>("state", (e) => applyState(e.payload));
-    return () => void unlisten.then((f) => f());
+    invoke<ModelEntry[]>("list_models").then((m) => (models = m));
+    const unlisten = [
+      listen<Snapshot>("state", (e) => applyState(e.payload)),
+      listen<{ id: string; done: number; total: number }>("model-download", (e) => (download = e.payload)),
+    ];
+    return () => unlisten.forEach((u) => u.then((f) => f()));
   });
 
   function applyState(s: Snapshot) {
@@ -99,6 +106,36 @@
   }
 
   const send = (command: string) => invoke("send_command", { command });
+
+  const mb = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
+
+  async function refreshModels() {
+    models = await invoke<ModelEntry[]>("list_models");
+    env = await invoke<Env>("environment");
+  }
+
+  async function downloadModel(id: string, use: boolean) {
+    downloadError = "";
+    download = { id, done: 0, total: 1 };
+    try {
+      await invoke("download_model", { id });
+      if (use) await invoke("use_model", { id });
+    } catch (e) {
+      if (!String(e).includes("cancelled")) downloadError = String(e);
+    }
+    download = null;
+    await refreshModels();
+  }
+
+  async function useModel(id: string) {
+    try {
+      await invoke("use_model", { id });
+      settings = await invoke<Settings>("get_settings");
+    } catch (e) {
+      downloadError = String(e);
+    }
+    await refreshModels();
+  }
 
   // Compositor keybind lines for Wayland, in Hyprland's syntax.
   function hyprKey(shortcut: string): string {
@@ -154,14 +191,11 @@
 
   {#if env && !env.modelFound}
     <div class="warn">
-      <strong>Speech model not found.</strong> Download
-      <a href="#model" onclick={(e) => {
-          e.preventDefault();
-          openUrl("https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3-turbo-q5_0.bin");
-        }}>ggml-large-v3-turbo-q5_0.bin</a>
-      (about 550 MB) and put it here:
-      <code>{env.model}</code>
-      An in-app download is coming.
+      <strong>Dictator needs a speech model before it can turn on.</strong>
+      It runs on your computer, so nothing you say leaves it. It's a one-time download.
+      {#if !download}
+        <div><button class="primary" onclick={() => downloadModel("turbo", true)}>Download the recommended model ({mb(models[0]?.bytes ?? 574e6)})</button></div>
+      {/if}
     </div>
   {/if}
 
@@ -232,6 +266,32 @@
     </section>
 
     <section>
+      <h2>Speech model</h2>
+      {#each models as m}
+        <div class="model" class:in-use={m.inUse}>
+          <div class="model-text">
+            <strong>{m.label}</strong> <span class="muted">{mb(m.bytes)}</span>
+            {#if m.inUse}<span class="pill ready">In use</span>{/if}
+            <div class="hint">{m.note}</div>
+            {#if download?.id === m.id}
+              <progress value={download.done} max={download.total}></progress>
+              <span class="muted">{mb(download.done)} of {mb(download.total)}</span>
+            {/if}
+          </div>
+          {#if download?.id === m.id}
+            <button onclick={() => invoke("cancel_download")}>Cancel</button>
+          {:else if m.downloaded && !m.inUse}
+            <button onclick={() => useModel(m.id)}>Use</button>
+          {:else if !m.downloaded}
+            <button disabled={!!download} onclick={() => downloadModel(m.id, !models.some((x) => x.inUse && x.downloaded))}>Download</button>
+          {/if}
+        </div>
+      {/each}
+      {#if downloadError}<p class="error">{downloadError}</p>{/if}
+      <p class="hint">A new model is used from the next time you turn Dictator on. Models are saved in <code>{env?.model?.replace(/[^/\\]*$/, "")}</code></p>
+    </section>
+
+    <section>
       <h2>Draft</h2>
       <div class="row">
         <span>Folder</span>
@@ -292,5 +352,10 @@
   pre { font-size: 12px; background: #e9e9ef; padding: 8px 10px; border-radius: 6px; overflow-x: auto; margin: 0 0 8px; }
   code { font-size: 12px; background: #ececf1; padding: 1px 5px; border-radius: 4px; word-break: break-all; }
   code.path { flex: 1; }
-  a { color: #2b8ac6; }
+  .model { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid rgba(128, 128, 140, 0.18); }
+  .model:first-of-type { border-top: none; }
+  .model-text { flex: 1; }
+  .model .pill { margin-left: 6px; }
+  progress { width: 60%; vertical-align: middle; margin-right: 8px; }
+  .warn button { margin-top: 8px; }
 </style>

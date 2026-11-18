@@ -39,10 +39,12 @@ Say "new paragraph" or "new line" while dictating to break up the text.
 Files live in `Documents/Dictator/`. `draft.txt` is the draft, and if you add a
 `vocab.txt` there, names and jargon in it get spelled correctly more often.
 
-Model: put [`ggml-large-v3-turbo-q5_0.bin`](https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-large-v3-turbo-q5_0.bin)
-in `~/.local/share/dictator/models/` (Linux) or `%APPDATA%\dictator\models\` (Windows).
-For now you download it by hand. The first `on` on a new machine takes about 20 s
-while the GPU driver compiles shaders; after that it takes about 2 s.
+The first time you open it, the settings window offers to download the speech
+model (Whisper Large v3 Turbo, 574 MB; smaller ones are there for weaker PCs).
+Downloads are checked against pinned SHA-256 hashes. The first "on" on a new
+machine can take ~20 s while the GPU driver compiles shaders. After that it takes about 2 s.
+
+The tray icon shows the state: grey when off, a red dot while listening, a yellow dot while busy.
 
 ## Development
 
@@ -53,15 +55,23 @@ for whisper.cpp.
 ```sh
 pnpm install
 pnpm tauri dev
+pnpm tauri build                            # installers in src-tauri/target/release/bundle
 cd src-tauri && cargo test                  # unit tests
 # real-model GPU test (see stt.rs for how to make the clip):
 DICTATOR_TEST_CLIP=/tmp/s.f32 cargo test -- --ignored --nocapture
 ```
 
+CI (`.github/workflows/build.yml`) builds and tests on Windows and Linux and uploads
+the installers as artifacts. [TESTING.md](TESTING.md) is the manual checklist,
+mostly for in-game behaviour that tests can't cover.
+
 ## Platform notes
 
 - **Linux / Wayland:** the overlay is a wlr-layer-shell surface (Hyprland, Sway, KDE).
   GNOME has no layer-shell, so the overlay falls back to a normal always-on-top window.
+- **Windows:** the overlay is a topmost, click-through window that can't be activated,
+  so it never takes focus from the game. Use borderless/windowed fullscreen;
+  exclusive fullscreen draws over everything.
 - **NVIDIA on Wayland:** the app sets `__NV_DISABLE_EXPLICIT_SYNC=1` at startup. Without it,
   WebKitGTK either crashes with "Missing acquire timeline" or only repaints part of the overlay.
 

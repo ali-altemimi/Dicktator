@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Dictator app icon: a microphone in a speech bubble. Regenerate the
+       platform icons with: pnpm tauri icon assets/icon.svg -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2a33"/>
+      <stop offset="1" stop-color="#15151a"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <!-- speech bubble tail -->
+  <path d="M300 760 L250 880 L420 790 Z" fill="#e5484d"/>
+  <rect x="200" y="200" width="624" height="590" rx="150" fill="#e5484d"/>
+  <!-- microphone -->
+  <rect x="432" y="270" width="160" height="290" rx="80" fill="#fff"/>
+  <path d="M352 470 a160 160 0 0 0 320 0" fill="none" stroke="#fff" stroke-width="44" stroke-linecap="round"/>
+  <line x1="512" y1="630" x2="512" y2="700" stroke="#fff" stroke-width="44" stroke-linecap="round"/>
+  <line x1="440" y1="708" x2="584" y2="708" stroke="#fff" stroke-width="44" stroke-linecap="round"/>
+</svg>

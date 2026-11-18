@@ -3,6 +3,7 @@ mod config;
 mod draft;
 mod engine;
 mod hotkeys;
+mod models;
 mod overlay;
 mod sound;
 mod stt;
@@ -31,6 +32,8 @@ struct Shared {
     /// deadlock with the main thread. Only touch it on the main thread.
     tray: OnceLock<tray::Tray>,
     overlay_shown: AtomicBool,
+    downloading: AtomicBool,
+    cancel_download: AtomicBool,
 }
 
 /// Connects the engine to the app.
@@ -187,6 +190,72 @@ fn environment(shared: tauri::State<'_, Shared>) -> Environment {
     }
 }
 
+/// A model the settings window can offer.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelEntry {
+    id: &'static str,
+    label: &'static str,
+    note: &'static str,
+    bytes: u64,
+    downloaded: bool,
+    in_use: bool,
+}
+
+#[tauri::command]
+fn list_models(shared: tauri::State<'_, Shared>) -> Vec<ModelEntry> {
+    let current = Config::from_settings(&shared.settings.lock().unwrap()).model;
+    models::MODELS
+        .iter()
+        .map(|m| ModelEntry {
+            id: m.id,
+            label: m.label,
+            note: m.note,
+            bytes: m.bytes,
+            downloaded: m.path().is_file(),
+            in_use: m.path() == current,
+        })
+        .collect()
+}
+
+/// Downloads a model (one at a time), emitting `model-download` progress.
+#[tauri::command]
+async fn download_model(app: AppHandle, id: String) -> Result<(), String> {
+    let model = models::find(&id).ok_or("Unknown model")?;
+    let shared = app.state::<Shared>();
+    if shared.downloading.swap(true, Ordering::SeqCst) {
+        return Err("Another download is already running".into());
+    }
+    shared.cancel_download.store(false, Ordering::SeqCst);
+    let result = models::download(model, &shared.cancel_download, |p| {
+        let _ = app.emit("model-download", p);
+    })
+    .await;
+    shared.downloading.store(false, Ordering::SeqCst);
+    result.map(|_| ()).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn cancel_download(shared: tauri::State<'_, Shared>) {
+    shared.cancel_download.store(true, Ordering::SeqCst);
+}
+
+/// Switches to a downloaded model. Takes effect from the next "on".
+#[tauri::command]
+fn use_model(app: AppHandle, id: String) -> Result<(), String> {
+    let model = models::find(&id).ok_or("Unknown model")?;
+    let path = model.path();
+    if !path.is_file() {
+        return Err("Download it first".into());
+    }
+    let mut settings = app.state::<Shared>().settings.lock().unwrap().clone();
+    // The default model is stored as "none" so a future default can replace it.
+    settings.model = (path != Config::default_model()).then_some(path);
+    settings.save(&Settings::path()).map_err(|e| format!("Couldn't save settings: {e}"))?;
+    apply_settings(&app, settings);
+    Ok(())
+}
+
 // ---- CLI ---------------------------------------------------------------------
 
 /// Runs a command by name: engine commands plus app-level ones.
@@ -237,6 +306,8 @@ pub fn run() {
             hotkeys: Mutex::new(HotkeyStatus::default()),
             tray: OnceLock::new(),
             overlay_shown: AtomicBool::new(false),
+            downloading: AtomicBool::new(false),
+            cancel_download: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -246,6 +317,10 @@ pub fn run() {
             send_command,
             open_folder,
             environment,
+            list_models,
+            download_model,
+            cancel_download,
+            use_model,
         ])
         .on_window_event(|window, event| {
             // Closing the settings window hides it; the app lives in the tray.
