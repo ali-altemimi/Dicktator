@@ -52,6 +52,14 @@ Needs Rust, Node + pnpm, and the [Tauri prerequisites](https://v2.tauri.app/star
 On Linux you also need `gtk-layer-shell`, and Vulkan headers plus `glslc` (shaderc)
 for whisper.cpp.
 
+On **Windows**, install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) and build
+with a short target directory. whisper.cpp's Vulkan shader build nests deep, and
+MSBuild fails on paths over 260 characters (error FTK1011):
+
+```powershell
+$env:CARGO_TARGET_DIR = "C:\t"   # set it permanently with: setx CARGO_TARGET_DIR C:\t
+```
+
 ```sh
 pnpm install
 pnpm tauri dev

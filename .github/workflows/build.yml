@@ -13,10 +13,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04]
+        include:
+          # A short build dir on Windows: whisper.cpp's Vulkan shader build
+          # nests deep, and MSBuild fails past 260 characters (FTK1011).
+          - os: windows-latest
+            target_dir: C:\t
+          - os: ubuntu-24.04
+            target_dir: ${{ github.workspace }}/src-tauri/target
     runs-on: ${{ matrix.os }}
     env:
       VULKAN_VERSION: 1.4.363.1
+      CARGO_TARGET_DIR: ${{ matrix.target_dir }}
     steps:
       - uses: actions/checkout@v4
 
@@ -102,9 +109,9 @@ jobs:
         with:
           name: dictator-${{ runner.os }}
           path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
-            src-tauri/target/release/bundle/appimage/*.AppImage
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/nsis/*.exe
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/msi/*.msi
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/deb/*.deb
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/rpm/*.rpm
+            ${{ env.CARGO_TARGET_DIR }}/release/bundle/appimage/*.AppImage
           if-no-files-found: error
