@@ -13,6 +13,20 @@ into your doc when you're done.
 **Status:** early development. Works end to end on Linux/Wayland. The Windows build
 hasn't been tested yet.
 
+## Install
+
+Download the installer for your system from [Releases](https://github.com/ali-altemimi/Dicktator/releases).
+
+On Windows, run `Dictator_x.y.z_x64-setup.exe`. It installs for your user only, so
+there's no admin prompt. The installer isn't code-signed yet, so SmartScreen will
+warn "Windows protected your PC". Click More info, then Run anyway.
+
+On Linux, use the `.deb` on Debian or Ubuntu, the `.rpm` on Fedora, and the
+`.AppImage` anywhere else.
+
+The first time Dictator starts, the settings window opens and offers to download a
+speech model.
+
 ## Usage
 
 Dictator lives in the tray and starts **off**: the model isn't loaded and the mic
