@@ -83,8 +83,22 @@
     const unlisten = [
       listen<Snapshot>("state", (e) => applyState(e.payload)),
       listen<{ id: string; done: number; total: number }>("model-download", (e) => (download = e.payload)),
+      // Settings changed elsewhere (tray, hotkey, CLI). Without this the form
+      // goes stale and the next save writes the old values back.
+      listen<Settings>("settings", (e) => (settings = e.payload)),
     ];
-    return () => unlisten.forEach((u) => u.then((f) => f()));
+    // A model file dropped in by hand should clear the "needs a model" banner
+    // without a restart: re-check when the window is shown or focused again.
+    const recheck = () => {
+      if (document.visibilityState === "visible" && !download) refreshModels();
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      unlisten.forEach((u) => u.then((f) => f()));
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+    };
   });
 
   function applyState(s: Snapshot) {
